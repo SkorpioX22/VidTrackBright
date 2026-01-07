@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Brightest Triangles Dashboard - Export</title>
+<style>
+html, body {
+  margin:0; padding:0; height:100%; overflow:hidden; background:#111; color:#fff;
+  font-family: Arial, sans-serif;
+}
+
+#container {
+  display:flex; height:100%; width:100%;
+  box-sizing:border-box;
+}
+
+#videoWrapper {
+  flex:1; display:flex; justify-content:center; align-items:center;
+  background:#000; overflow:hidden;
+}
+
+#videoCanvas {
+  display:block; max-width:100%; max-height:100%;
+}
+
+#dashboard {
+  width:250px; padding:20px; box-sizing:border-box; background:#222;
+  display:flex; flex-direction:column;
+}
+
+.slider-group { margin-bottom:20px; }
+label { display:block; margin-bottom:5px; }
+input[type=range] { width:100%; }
+button, input[type=file] { padding:10px; font-size:16px; margin-top:10px; cursor:pointer; width:100%; }
+#seekBar { margin-top:10px; }
+
+#credit {
+  margin-top:auto;
+  font-size:12px;
+  text-align:center;
+}
+#credit a {
+  color:#0af; text-decoration:none;
+}
+#credit a:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="videoWrapper">
+    <canvas id="videoCanvas"></canvas>
+  </div>
+  <div id="dashboard">
+    <div class="slider-group">
+      <label>Number of Triangles: <span id="triNumLabel">64</span></label>
+      <input type="range" id="triNum" min="1" max="128" value="64">
+    </div>
+    <div class="slider-group">
+      <label>Number of Lines: <span id="lineNumLabel">80</span></label>
+      <input type="range" id="lineNum" min="0" max="200" value="80">
+    </div>
+    <div class="slider-group">
+      <label>Brightness Min: <span id="brightnessLabel">200</span></label>
+      <input type="range" id="brightness" min="0" max="255" value="200">
+    </div>
+    <button id="playPause">Pause</button>
+    <input type="file" id="videoFile" accept="video/*">
+    <input type="range" id="seekBar" min="0" max="100" value="0">
+
+    <button id="startExport">Start Export</button>
+    <button id="stopExport" disabled>Stop Export</button>
+
+    <div id="credit">
+      Made by <a href="https://github.com/SkorpioX22" target="_blank">SkorpioX22</a>
+    </div>
+  </div>
+</div>
+
+<video id="video" style="display:none;" crossorigin="anonymous"></video>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('videoCanvas');
+const ctx = canvas.getContext('2d');
+
+let triangles = [];
+let playing = true;
+let mediaRecorder, recordedChunks = [];
+
+const triNumSlider = document.getElementById('triNum');
+const lineNumSlider = document.getElementById('lineNum');
+const brightnessSlider = document.getElementById('brightness');
+const triNumLabel = document.getElementById('triNumLabel');
+const lineNumLabel = document.getElementById('lineNumLabel');
+const brightnessLabel = document.getElementById('brightnessLabel');
+
+const seekBar = document.getElementById('seekBar');
+let seeking = false;
+
+triNumSlider.oninput = () => { triNumLabel.textContent = triNumSlider.value; }
+lineNumSlider.oninput = () => { lineNumLabel.textContent = lineNumSlider.value; }
+brightnessSlider.oninput = () => { brightnessLabel.textContent = brightnessSlider.value; }
+
+document.getElementById('playPause').onclick = () => {
+  playing = !playing;
+  document.getElementById('playPause').textContent = playing ? "Pause" : "Play";
+  if(playing) renderFrame();
+}
+
+document.getElementById('videoFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if(file){
+    video.src = URL.createObjectURL(file);
+    video.addEventListener('loadedmetadata', () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      seekBar.max = Math.floor(video.duration);
+      video.play();
+      playing = true;
+      document.getElementById('playPause').textContent = "Pause";
+      renderFrame();
+    }, { once:true });
+  }
+}
+
+// Seek bar
+seekBar.addEventListener('input', () => {
+  seeking = true;
+  video.currentTime = seekBar.value;
+});
+seekBar.addEventListener('change', () => { seeking = false; });
+video.addEventListener('timeupdate', () => {
+  if(!seeking) seekBar.value = Math.floor(video.currentTime);
+});
+
+// Export buttons
+document.getElementById('startExport').onclick = () => {
+  recordedChunks = [];
+  const stream = canvas.captureStream(30); // 30fps
+  mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp9' });
+  mediaRecorder.ondataavailable = e => { if(e.data.size>0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = saveExport;
+  mediaRecorder.start();
+  document.getElementById('startExport').disabled = true;
+  document.getElementById('stopExport').disabled = false;
+  alert('Recording started!');
+};
+
+document.getElementById('stopExport').onclick = () => {
+  mediaRecorder.stop();
+  document.getElementById('startExport').disabled = false;
+  document.getElementById('stopExport').disabled = true;
+};
+
+function saveExport(){
+  const blob = new Blob(recordedChunks, { type: 'video/webm' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'exported_video.webm';
+  a.click();
+  URL.revokeObjectURL(url);
+  alert('Video exported!');
+}
+
+// downscale factor for brightness
+const DOWNSCALE = 4;
+
+function renderFrame(){
+  if(video.paused || video.ended) return;
+
+  const wrapper = document.getElementById('videoWrapper');
+  const scale = Math.min(wrapper.clientWidth / canvas.width, wrapper.clientHeight / canvas.height);
+  canvas.style.width = canvas.width * scale + "px";
+  canvas.style.height = canvas.height * scale + "px";
+
+  ctx.drawImage(video, 0, 0);
+
+  const smallW = Math.floor(canvas.width / DOWNSCALE);
+  const smallH = Math.floor(canvas.height / DOWNSCALE);
+  const smallCanvas = document.createElement('canvas');
+  smallCanvas.width = smallW; smallCanvas.height = smallH;
+  const smallCtx = smallCanvas.getContext('2d');
+  smallCtx.drawImage(video, 0, 0, smallW, smallH);
+  const smallData = smallCtx.getImageData(0,0,smallW,smallH).data;
+
+  let brightnessArr = [];
+  for(let y=0; y<smallH; y++){
+    for(let x=0; x<smallW; x++){
+      let i=(y*smallW+x)*4;
+      let r=smallData[i], g=smallData[i+1], b=smallData[i+2];
+      let bright = 0.299*r + 0.587*g + 0.114*b;
+      if(bright >= brightnessSlider.value) brightnessArr.push({x:x*DOWNSCALE, y:y*DOWNSCALE, bright});
+    }
+  }
+
+  brightnessArr.sort((a,b)=>b.bright - a.bright);
+  triangles = brightnessArr.slice(0, triNumSlider.value).map(p=>({x:p.x,y:p.y}));
+
+  if(triangles.length>0){
+    let mask = ctx.createImageData(canvas.width, canvas.height);
+    for(const t of triangles) drawTriangleMask(mask, t.x, t.y, 10);
+    const frameData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    for(let i=0;i<frameData.data.length;i+=4){
+      if(mask.data[i]>0){
+        frameData.data[i]=255-frameData.data[i];
+        frameData.data[i+1]=255-frameData.data[i+1];
+        frameData.data[i+2]=255-frameData.data[i+2];
+      }
+    }
+    ctx.putImageData(frameData,0,0);
+  }
+
+  triangles.forEach((t,i)=>drawTriangleOutline(t.x,t.y,10,i+1));
+
+  const numLines = parseInt(lineNumSlider.value);
+  for(let i=0;i<numLines;i++){
+    if(triangles.length<2) break;
+    let [a,b]=[triangles[Math.floor(Math.random()*triangles.length)],
+               triangles[Math.floor(Math.random()*triangles.length)]];
+    ctx.strokeStyle='white';
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y);
+    ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+  }
+
+  if(playing) requestAnimationFrame(renderFrame);
+}
+
+function drawTriangleMask(mask,cx,cy,size){
+  for(let y=-size;y<=size;y++){
+    for(let x=-size;x<=size;x++){
+      if(y >= -x - size && y >= x - size){
+        let px = cx+x, py=cy+y;
+        if(px>=0 && py>=0 && px<mask.width && py<mask.height){
+          let i=(py*mask.width+px)*4;
+          mask.data[i]=255;
+        }
+      }
+    }
+  }
+}
+
+function drawTriangleOutline(cx,cy,size,label){
+  ctx.strokeStyle='white';
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.moveTo(cx,cy-size);
+  ctx.lineTo(cx-size,cy+size);
+  ctx.lineTo(cx+size,cy+size);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.fillStyle='white';
+  ctx.font='12px monospace';
+  ctx.fillText(label,cx+4,cy-6);
+}
+</script>
+</body>
+</html>
